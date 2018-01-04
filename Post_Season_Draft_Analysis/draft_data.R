@@ -95,3 +95,10 @@ all_players$PLAYER <- gsub("[']","",all_players$PLAYER)
 all_players$PLAYER[52] <- trimws(gsub("II","",all_players$PLAYER[52]))
 ## Clean up player names. 
 setdiff(draft_data$player,all_players$PLAYER)
+
+saveRDS(all_players,"Post_Season_Draft_Analysis/all_players_raw.RDS")
+all_players_sel <- all_players %>% select(PLAYER,`TEAM POS`,PTS) %>% 
+  mutate(PTS = as.numeric(PTS))
+
+final_dat <- draft_data %>% inner_join(.,all_players_sel,by=c("player"="PLAYER"))
+saveRDS(final_dat,"Post_Season_Draft_Analysis/final_players_data.RDS")
