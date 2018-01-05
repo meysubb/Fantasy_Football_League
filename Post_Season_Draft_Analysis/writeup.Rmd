@@ -1,0 +1,194 @@
+---
+title: "Fantasy_Analysis"
+output: html_document
+---
+
+```{r load, echo=FALSE,message=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+library(ggfortify)
+library(highcharter)
+library(htmlwidgets)
+
+players <- readRDS("final_players_data.RDS")
+### Basic plot before develop ranks
+players_df <- players %>% mutate(
+  diff = PTS - exp_pts,
+  round = ceiling(draft_pos/10)
+) %>% select(-`TEAM POS`)
+
+players_df <- players_df[-c(2,12),]
+```
+
+I've been commish in this league for a while now. We've tested about everything from different engines, to different rules, etc. Earlier in the year, my league had a discussion about re-evaluating our draft and looking for high value players.
+
+### Player Performance
+
+```{r,echo=FALSE}
+
+x <- c("Player","Position","Projected PTS", "Actual PTS")
+y <-c ("{point.player}","{point.playerposition}", 
+       sprintf("{point.%s:.2f}", c("exp_pts", "PTS")))
+
+tltip <- tooltip_table(x,y)
+
+hc <- hchart(players_df, "scatter", hcaes(x = exp_pts, y = PTS, group = playerposition)) %>% 
+  hc_xAxis(title = list(text = "Projected Points (FFA)")) %>% 
+  hc_yAxis(title = list(text = "Actual Points")) %>% 
+  hc_title(text = "Fantasy Football Performance",align = "left") %>% 
+  hc_subtitle(text = "2017 Season - ESPN (Drafted players only)",align = "left") %>% 
+  hc_credits(
+    enabled = TRUE,
+    text = "@msubbaiah1",
+    href = "https://twitter.com/msubbaiah1"
+  ) %>% 
+  hc_tooltip(useHTML = TRUE, headerFormat = "", pointFormat = tltip) %>% 
+  hc_legend(layout = "vertical", verticalAlign = "top",
+            align = "right", valueDecimals = 0) %>% 
+  hc_add_theme(hc_theme_db())
+
+saveWidget(hc, file="pre_lim_FFP.html")
+```
+
+Clearly it seems that QB's are in a league of their own, but that's pretty standard I would say across all leagues. This is a standard ESPN league with a few tweaks. I did however come across an interesting article suggesting that QB rules should be more rewarding and penalizing at the same time. 6 points for TDs and -4 for interceptions. Thus creating more separation for the elite QBs and potentially discourage streaming QBs to a playoff spot. 
+
+It's pretty easy to spot the injuries, like David Johnson on the bottom left. But it's definitely interesting to point out how well Todd Gurley, Mark Ingram, Marvin Jones, and Melvin Gordon (to name a few) looked. They all out-performed their projections. Gurley of course shattered his expectations, that probably stems from the help he got from Jared Goff and the rest of the Rams offense. 
+
+Just a note the projections were taken from Fantasy Football Analytics, they develop projections using custom rules from a league and a combination of different sources which includes: CBS Sports, ESPN, FantasyPros, NFL.com, Yahoo, etc. Go check it out http://fantasyfootballanalytics.net/. 
+
+### Draft Results
+
+So let's take a quick look at the draft results. We should note that one or two injuries can immediately skew projectiosn to be much greater than the actual points scored from players in each round. So that's something to keep in mind.
+
+
+```{r,echo=FALSE}
+projected_by_round <- players_df %>% group_by(round) %>% 
+  summarize(players_drafted=n(),
+            avg_projected = mean(exp_pts),
+            avg_value = mean(PTS),
+            avg_diff = mean(diff)) %>% ungroup()
+
+melt_plot2<- projected_by_round %>% select(-c(avg_diff,players_drafted)) %>% 
+  reshape2::melt(.,id.vars="round")
+
+ggplot() + 
+  geom_bar(aes(x=factor(round),y=value,fill=variable),
+           data=melt_plot2,stat='identity',position = "dodge") + 
+  scale_fill_manual(labels=c("Projected Avg","Actual Avg"),values = c("maroon", "blue")) +
+  theme_hc(bgcolor = "darkunica") +
+  labs(x="Draft Round",y="Average Value",title="Draft Value by Round",
+       subtitle="Drafted Players only",
+       caption="@msubbaiah1")
+```
+
+I'm a bit surprised to see Round 4's projections to be quite low. Unsurprisngly, our Round 4 was filled with some serious injuries: Dalvin Cook, Allen Robinson, Terrelle Pryor, and Emmanuel Sanders. The catch in that round Kennan Allen and then Jarvis Landry. That was a rough one for sure. 
+
+As we move on to the later rounds, projected and actual average value seem to catch up with each other. Alright let's move on to the draft valuation step.  
+
+### Draft Valuation 
+
+
+```{r dat_sel,echo=FALSE}
+dat_lin <- players_df %>% group_by(playerposition) %>% 
+  mutate(proj_posrank = rank(desc(exp_pts)),
+    posrank = rank(desc(PTS))) %>% select(draft_pos,round,player,playerposition,exp_pts,proj_posrank,PTS,posrank) %>% 
+  ungroup()
+```
+
+It took a bit to figure out exactly how I wanted to go about the redraft process. At first, I was thinking about creating a valuation process and going from there. But that wouldn't capture the effect of different positions. 
+
+Eventually, it came down to running a simple linear regression. Draft position was compared against players position, expected points, and expected position rank. 
+
+```{r,echo=FALSE,message=FALSE}
+lin <- lm(draft_pos~exp_pts + proj_posrank + playerposition,data=dat_lin)
+summary(lin)
+```
+
+Remember, the high value draft picks are at lower numbers. That should make it a bit easier to understand why some of the coefficients are negative. So with every added expected point, the players draft stock increase by -0.2. 
+
+It also captures the position battles very well, all RBs/WRs are to be drafted much earlier than most other positions. BA player immediately moves up about 78 spots in the draft, if they were a WR and about 83 spots for RBs. This suggets that K and QBs are to be drafted later (again it would be worth changing the rules for QBs). But there isn't much to be had here as these variables are not very significant. The default position is D/ST, this was chosen by R not myself. 
+
+This model isn't perfect but should be very capable of capturing an adequate redraft. Using the regression, the draft can be redone using actual points, actual position rank and of course position. 
+
+#### Model Diagnostics
+
+Before we move forth with reconstructing the draft based on actual results, let's study the validity of our model. 
+
+```{r,echo=FALSE,message=FALSE}
+autoplot(lin, which = 1:4,colour = 'dodgerblue3',
+         label.size = 3, label.colour = 'red') + 
+  theme_hc(bgcolor = "darkunica")
+```
+
+A couple of things we look for when running a linear regression, (1) is the data linear?, (2) do we have homoscedasticity?, (3) are the error terms normally distributed? and (4) are there many outliers?
+
+Looking at the two plots on the left, we can come to conclusions about (1) and (2). The Residuals vs. Fitted plot shows a slight cure here, but besides that it mostly depicts a linear relationship. There is some concern, but not enough to warrant adding a quadratic term. The variance of the error terms are equal. The Scale-Location plot, in an ideal situation would have a horizontal blue line. However, we don't have trends going in either direction and can thus claim that it is satisfactory enough to be homoscedastic. 
+
+The Q-Q plot helps understand whether the errors are normally distributed. An exacty linear relationship would show that errors are normally distributed. In this case with the exception of 3 outliers, there is a linear relationship.
+
+Lastly, Cook's distance is used to identify outliers. Here there are only 3 outliers, therefore there isn't much to worry about and can continue using this regression model. 
+
+Overall the model looks satisfactory. We can move on to re-drafting now. Finally, the exciting stuff AM I RIGHT?!
+
+### Re-Drafting 
+
+I'll go ahead and give you two different options to look at the redraft either through a table or a plot. The plot is interactive so hopefully that gives you a bit more detail. 
+
+```{r echo=FALSE,message=FALSE}
+x_test <- dat_lin %>% select(PTS,playerposition,posrank) 
+## Change names to match regression
+colnames(x_test)[c(1,3)] <- c("exp_pts","proj_posrank")
+dat_lin$redraft <- predict(lin,x_test)
+idx_order <- order(dat_lin$redraft)
+dat_lin$redraft_round[idx_order] <- c(rep(1:14, each=10),rep(15,6))
+dat_lin$redraft_pos[idx_order] <- seq(1:nrow(dat_lin))
+```
+
+```{r table, echo=FALSE}
+names_spaced <- c("Player","Redrafted Position","Redrafted Round","Draft Position","Draft Round")
+
+dat_lin %>% select(player,redraft_pos,redraft_round,draft_pos,round) %>% filter(redraft_round<=5) %>%  arrange(redraft_pos) %>% 
+kable("html", escape = F,col.names = names_spaced) %>%
+  kable_styling("hover", full_width = F) %>% 
+  row_spec(0, bold = T, color = "white", background = "#D7261E")
+```
+
+For the sake of keeping the table simple, we shall only at the first four rounds. So the re-draft is already at work, with it only suggesting 3 of the original first rounders remaining in the first round. Looks like Hopkins, Hunt and Ingram were all steals outside of the first round. 
+
+Even with Zeke's suspensions, he is a 2nd rounder. To be fair though, the guy who drafted Zeke had two first round draft picks and Zeke was his second pick. Yep, I went with the billicheck and tried to get more picks in the top 50. Needless to say it was not my year, not a lot of my players panned out. But, looking back at the draft and the re-draft. I would trade down AGAIN. 
+
+It's surprising to see a couple of 11 rounders and onwards up here. But you have to factor into account injuries to some of the other players. Latavius Murray wouldn't be so high on the list if it wasn't for Dalvin's injury. 
+
+Anyway's I'll lead you browse through the rest of it. If you want all of the data, you can download it from the chart below. 
+
+```{r,echo=FALSE,message=FALSE}
+x <- c("Player","Position","Actual Draft Position", "Redrafted Position","Points Scored","Projected Points")
+y <-c ("{point.player}","{point.playerposition}", "{point.draft_pos}","{point.redraft_pos}",
+       "{point.PTS:.2f}","{point.exp_pts:.2f}")
+
+tltip2 <- tooltip_table(x,y)
+
+
+h3 <- hchart(dat_lin, "scatter", hcaes(x = draft_pos, y = redraft_pos, group = playerposition)) %>% 
+  hc_xAxis(title = list(text = "Actual Draft Position")) %>% 
+  hc_yAxis(title = list(text = "Redrafted Position")) %>% 
+  hc_title(text = "Redrafting 2017 Fantasy Football",align = "left") %>% 
+  hc_subtitle(text = "2017 Season - ESPN (Drafted players only)",align = "left") %>% 
+  hc_credits(
+    enabled = TRUE,
+    text = "@msubbaiah1",
+    href = "https://twitter.com/msubbaiah1"
+  ) %>% 
+  hc_tooltip(useHTML = TRUE, headerFormat = "", pointFormat = tltip2) %>% 
+  hc_add_theme(hc_theme_db()) %>% 
+   hc_exporting(enabled = TRUE)
+saveWidget(h3, file="redraft_FF.html")
+```
+
+For Injuries: look in the top left corner. (Michael Thomas, David Johnson, etc)
+For Busts: look for anyone above the 100 redrafted position. Don't forget about the waiver wire! 
+For Steals: look in the top right corner. (Adam Thienlen, Duke Johnson, Marvin Jones, etc)
+
+So much for all the hype on Crowell, Johnson is the guy to have from Cleveland which makes sense. Cleveland always goes down, and then they need their pass-catching back in the game. Hell they even run him out of the slot. Hopefully the Browns can turn it around sometime soon.

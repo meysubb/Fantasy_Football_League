@@ -9,9 +9,7 @@ players_df <- players %>% mutate(
 players_df <- players_df[-2,]
 players_df <- players_df[-12,]
 
-labels <- players_df %>% filter(diff>50)
-library(ggplot)
-library(ggrepel)
+
 
 ggplot(players_df,aes(x=exp_pts,y=PTS,color=playerposition)) + 
   geom_point(show.legend = F) + 
@@ -36,21 +34,31 @@ projected_by_round <- players_df %>% group_by(round) %>%
             avg_value = mean(PTS),
             avg_diff = mean(diff)) %>% ungroup()
 
-###
-q <- players_df %>% mutate(
-  val = diff/round,
-  val2 = diff/draft_pos
-) 
 
-### PCA 
-pca_train <- players_df %>% select(draft_pos,exp_pts,PTS)
-prin_comp <- prcomp(pca_train, scale. = T)
 
-library(ggfortify)
-library(ggrepel)
-biplot(prin_comp,xlabs=players_df[,3])
+pl_test <- players_df %>% group_by(playerposition) %>% 
+  mutate(posrank = rank(desc(PTS)))
 
-autoplot(prin_comp, data = players_df, colour = 'playerposition',label=T,shape=F) 
-  
+### linear regression again
+lin <- lm(draft_pos~exp_pts + playerposition+posrank,data=pl_test)
 
+t <- pl_test %>% select(PTS,playerposition,posrank) 
+colnames(t)[1] <- "exp_pts"
+pl_test$pr_draftp <- predict(lin,t)
+
+order <- order(pl_test$pr_draftp)
+
+pl_test$pr_draft_round[order] <- c(rep(1:14, each=10),rep(15,6))
+
+par(mfrow = c(2,2))
+plot(lin,which=1:4)
+### Plot 1 (Residuals vs. Fitted)
+# linear assumption seems realistic
+# variance of error terms are equal (or so it seems)
+# a few outliers but not many
+
+### Plot 2 (Q-Q plot)
+## errors are normally distributed
+# with the exception of 3 points. (1,135,143)
+# corresponds to David Johnson, 
 
