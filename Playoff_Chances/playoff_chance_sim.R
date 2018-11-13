@@ -1,32 +1,37 @@
 library(tidyverse)
 options(stringsAsFactors = FALSE)
-standings <- read_csv("playoff_chances.csv")
+standings <- read_csv("sleeper_current_standings.csv")
 
-playoff_df <- as.data.frame(standings$Team)
+
+playoff_df <- as.data.frame(standings$name)
 playoff_df$made <- 0
 colnames(playoff_df)[1] <- "Team"
 
-score_std_dev <- sd(standings$Average)
+score_std_dev <- sd(standings$ppts)
 
-sched <- read_csv("rem_schedule.csv")
-sched <- sched %>% select(-X4,-X5)
+sched <- read_csv("r_sched_2.csv")
+sched <- sched %>% mutate(
+  Week = as.numeric(Week),
+  Matchup = as.numeric(Matchup)
+)
+#sched <- sched %>% select(-X4,-X5)
 
 library(foreach)
-n <- 5000
+n <- 50
 pb <- txtProgressBar(0, n, style = 2)
 ## Generate random df scores
-t <- foreach(i=1:5000) %do% {
+t <- foreach(i=1:50) %do% {
   setTxtProgressBar(pb, i)
-  scores <- as.data.frame(replicate(3,rnorm(10, mean = standings$Average, sd = score_std_dev)))
-  scores$Team <- standings$Team
+  scores <- as.data.frame(replicate(3,rnorm(10, mean = standings$ppts, sd = score_std_dev)))
+  scores$Team <- standings$name
   ## Need to find a better way to extract this
-  colnames(scores)[1:3] <- c(9,10,11)
+  colnames(scores)[1:3] <- c(11,12,13)
   scores <- reshape2::melt(scores)
   colnames(scores)[2] <- "Week"
   scores$Week <- as.numeric(scores$Week)
-  scores$Week[scores$Week == 1] <- 9
-  scores$Week[scores$Week == 2] <- 10
-  scores$Week[scores$Week == 3] <- 11
+  scores$Week[scores$Week == 1] <- 11
+  scores$Week[scores$Week == 2] <- 12
+  scores$Week[scores$Week == 3] <- 13
   
   
   sched2 <- inner_join(scores,sched)
