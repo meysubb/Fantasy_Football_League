@@ -1,3 +1,5 @@
+library(tidyverse)
+library(httr)
 url <- "https://api.sleeper.app/v1/league/307655088971718656/rosters"
 
 
