@@ -1,8 +1,9 @@
 ## Randomize Draft Order
 
-set.seed(76)
-teams <- c("RB","Chai","RG", "Dhak","Saadu",
-         "Suds","Just","Must","Bhargi","Mey")
+set.seed(77)
+# teams <- c("RB","Chai","RG", "Dhak","Saadu",
+#          "Suds","Just","Must","Bhargi","Mey")
+teams <- c("Mey","Barnes","Nol","Logan","TimCrook","MacDad","Deelaney","Kapa","Praveen","Diego")
 
 library(foreach)
 draft_order_random <- foreach(i = 1:100, .combine='rbind',.packages='mosaic') %do% {
@@ -20,9 +21,9 @@ draft_order_random %>% group_by(name) %>% summarize(avg_order = mean(ord)) %>%
 
 #### For the 12 man league with my Analytics peeps
 set.seed(55)
-teams <- c("Jessica","Tim","Chris", "Nick","Corey","Brett",
-           "Josh","Kyle","Reed","Ryan","Mey","Gihani")
-
+# teams <- c("Jessica","Tim","Chris", "Nick","Corey","Brett",
+#            "Josh","Kyle","Reed","Ryan","Mey","Gihani")
+teams <- c("Mey","Barnes","Nol","Logan","TimCrook","MacDad","Deelaney","Kapa","Praveen","Diego")
 
 draft_order_r <- foreach(i = 1:100, .combine='rbind',.packages='mosaic') %do% {
   prob_vec <- rep(1/12,12)
