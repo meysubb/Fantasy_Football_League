@@ -20,8 +20,8 @@ dens <- plyr::ddply(melt_plot_dat, "variable", function(x){
 ggplot(melt_plot_dat,aes(x=X1,y=value)) + 
   geom_bar(stat='identity') + 
   facet_wrap(~variable) + 
-  theme_bw() + 
+  theme_bw(base_size=16) + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
   scale_x_discrete(limits=final_proj$X1) + 
-  labs(x="",y="Record",title="Simulated Records",caption="@msubbaiah1") + 
-  scale_y_continuous(labels = scales::percent)
+  labs(x="",y="Record",title="Simulated Regular Season Records",subtitle='Freeman League',caption="@msubbaiah1") + 
+  scale_y_continuous(labels = scales::percent) 
