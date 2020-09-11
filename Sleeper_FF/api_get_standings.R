@@ -169,13 +169,19 @@ pbp_players <- pbp %>%
                values_to = "new_id",
                values_drop_na = TRUE)
 
+custom_mode <- function(x, na.rm = TRUE) {
+  if(na.rm){x <- x[!is.na(x)]}
+  ux <- unique(x)
+  return(ux[which.max(tabulate(match(x, ux)))])
+}
+
 both_eras_id_map <- legacy_pbp_players %>%
   left_join(
     pbp_players,
     by = c("season", "week", "home_team", "away_team", "play_id", "player_desc")
   ) %>%
   group_by(gsis_id) %>%
-  #mutate(new_id = custom_mode(new_id)) %>%
+  mutate(new_id = custom_mode(new_id)) %>%
   ungroup() %>%
   select(gsis_id, new_id) %>%
   distinct() %>%
