@@ -85,21 +85,22 @@ pbp <- purrr::map_df(seasons, function(x) {
 })
 
 # No, have to name match which is kind of lame
-all_players_url <- "https://api.sleeper.app/v1/players/nfl"
-all_players <- GET(all_players_url)
-all_players_cont <- content(all_players)
-
-# I can probably convert this to tibble
-players_tibble <- tibble(data = all_players_cont) %>%
-  unnest_wider(data) %>%
-  unnest_wider(fantasy_positions)
-
-# Rename positions
-players_tibble <- players_tibble %>%
-  rename("primary_position" = `...1`, 
-         "secondary_position" = `...2`,
-         "tertiary_position" = `...3`)
-saveRDS(players_tibble, "players_and_ids.rds")
+# all_players_url <- "https://api.sleeper.app/v1/players/nfl"
+# all_players <- GET(all_players_url)
+# all_players_cont <- content(all_players)
+# 
+# # I can probably convert this to tibble
+# players_tibble <- tibble(data = all_players_cont) %>%
+#   unnest_wider(data) %>%
+#   unnest_wider(fantasy_positions)
+# 
+# # Rename positions
+# players_tibble <- players_tibble %>%
+#   rename("primary_position" = `...1`, 
+#          "secondary_position" = `...2`,
+#          "tertiary_position" = `...3`)
+# saveRDS(players_tibble, "players_and_ids.rds")
+players_tibble <- readRDS("players_and_ids.rds")
 
 # Can I slice off the first set of digist in the pbp id's and join with sportsradar_id?
 mod_pbp <- pbp %>%
@@ -117,3 +118,77 @@ mod_sleeper <- players_tibble %>%
 # Fails :(
 mod_pbp %>%
   inner_join(mod_sleeper, by = c("passer_player_id" = "adj_sportradar"))
+
+# Checking for id matching with rds files from ffanalytics. Need to use load() bc .rda
+load("C:/Users/reyers9597/Downloads/ff_player_data.rda")
+load("C:/Users/reyers9597/Downloads/nfl_cols.rda")
+
+ff_player_data %>% View()
+
+# Stuff from nflfastR
+rosters_nflfastR <- readRDS("C:/Users/reyers9597/Downloads/roster.rds") %>%
+  select(teamPlayers.displayName, teamPlayers.gsisId) %>%
+  distinct()
+legacy_mappings <- readRDS("C:/Users/reyers9597/Downloads/legacy_id_map.rds")
+
+# Heyyy this has nflid and gsis id
+  # Surely at least one works?
+# First gsis
+unique_sleeper <- players_tibble %>%
+  select(full_name, gsis_id) %>%
+  distinct() %>%
+  mutate(gsis_id = trimws(gsis_id)) %>%
+  filter(!is.na(gsis_id))
+
+sleeper_and_nflfastr <- unique_sleeper %>%
+  left_join(rosters_nflfastR, by = c("gsis_id" = "teamPlayers.gsisId"))
+
+# Legacy mappings are even better somehow? But only for old players
+# Need the same gsis -> new_id mapping that they have here
+
+legacy_pbp <- purrr::map_df(seasons, function(x) {
+  readRDS(
+    url(
+      glue::glue("https://raw.githubusercontent.com/guga31bb/nflfastR-data/master/legacy-data/play_by_play_{x}.rds")
+    )
+  )
+})
+
+legacy_pbp_players <- legacy_pbp %>%
+  select(season, week, home_team, away_team, play_id, ends_with("player_id")) %>%
+  mutate(week = if_else(week == 22, 21, week)) %>%
+  pivot_longer(ends_with("player_id"),
+               names_to = "player_desc",
+               values_to = "gsis_id",
+               values_drop_na = TRUE)
+
+pbp_players <- pbp %>%
+  select(season, week, home_team, away_team, play_id, ends_with("player_id")) %>%
+  pivot_longer(ends_with("player_id"),
+               names_to = "player_desc",
+               values_to = "new_id",
+               values_drop_na = TRUE)
+
+both_eras_id_map <- legacy_pbp_players %>%
+  left_join(
+    pbp_players,
+    by = c("season", "week", "home_team", "away_team", "play_id", "player_desc")
+  ) %>%
+  group_by(gsis_id) %>%
+  #mutate(new_id = custom_mode(new_id)) %>%
+  ungroup() %>%
+  select(gsis_id, new_id) %>%
+  distinct() %>%
+  select( gsis_id, new_id) %>%
+  #filter(gsis_id %in% both_eras$teamPlayers.gsisId) %>% 
+  arrange(gsis_id) %>%
+  drop_na()
+
+# Lets see if this mapping fixes things
+full_map <- unique_sleeper %>%
+  left_join(both_eras_id_map, by = "gsis_id") %>%
+  filter(!is.na(new_id))
+
+saveRDS(full_map, "id_mapping.rds")
+# It does! There are some duplicates with different new_id but same gsis_id
+# This is probably what that custom_mode() function handles but I cant find in package
