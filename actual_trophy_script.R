@@ -2,6 +2,11 @@
 
 # General necessities
 
+# Libraries
+library(tidyverse)
+library(nflfastR)
+library(httr)
+
 # Mappings
 player_mappings <- readRDS("current_most_complete_map.rds")
 
@@ -75,5 +80,94 @@ rush_2020 <- smaller_pbp %>%
 st_and_penalties <- smaller_pbp %>%
   filter(!(play_type %in% c("pass", "run")))
 
+# Idea as to how to calculate fantasy points
+  # Just add fantasy column for convenience
+rusher_fantasy_and_epa <- rush_2020 %>%
+  mutate(position = "rusher",
+         relevant_player_id = rusher_player_id,
+         fant_pt = 0.1 * yards_gained + 6 * touchdown + 2 * two_point_conv_result)
+
+passer_fantasy_and_epa <- pass_2020 %>%
+  mutate(position = "passer",
+         relevant_player_id = passer_player_id,
+         fant_pt = 0.04 * yards_gained + 4 * touchdown + 2 * two_point_conv_result)
+
+receiver_fantasy_and_epa <- pass_2020 %>%
+  mutate(position = "receiver",
+         relevant_player_id = receiver_player_id,
+         fant_pt = 0.5 * complete_pass + 0.1 * yards_gained +
+              6 * touchdown + 2 * two_point_conv_result)
+
+# Note this will have duplicated rows 
+recombined_fantasy <- rusher_fantasy_and_epa %>%
+  bind_rows(passer_fantasy_and_epa) %>%
+  bind_rows(receiver_fantasy_and_epa)
+
 # 1. Hit the Showers Early
 # Team had the biggest point discrepancy between 1st and 2nd half of games
+player_halves <- recombined_fantasy %>%
+  group_by(game_id, game_half, relevant_player_id) %>%
+  summarize(tot_fant_pts = sum(fant_pt, na.rm = TRUE)) %>%
+  pivot_wider(names_from = game_half, values_from = tot_fant_pts) %>%
+  mutate(Half1 = if_else(is.na(Half1), 0, Half1),
+         Half2 = if_else(is.na(Half2), 0, Half2),
+         discrepancy = Half1 - Half2) %>%
+  arrange(desc(discrepancy)) %>%
+  filter(!is.na(relevant_player_id))
+
+showers <- named_rosters %>%
+  inner_join(player_halves, by = c("new_id" = "relevant_player_id")) %>%
+  filter(is_starter) %>%
+  group_by(user) %>%
+  summarize(early_game = sum(discrepancy)) %>%
+  arrange(desc(early_game))
+
+# 2. Any Given Sunday
+# Started the player with the largest Z score or largest difference from last week
+  # Dont yet know how to do this, just go with largest difference for now
+gap_fn <- function(curr_week, last_week){
+  if(length(last_week) == 1){
+    print("No previous games, default to 0.")
+    combined <- curr_week %>%
+      rename(curr_week_fant_pts = tot_fant_pts) %>%
+      mutate(curr_week_fant_pts = if_else(is.na(curr_week_fant_pts), 0 , curr_week_fant_pts),
+             improvement = curr_week_fant_pts)
+    return(combined)
+  }
+  
+  combined <- curr_week %>%
+    rename(curr_week_fant_pts = tot_fant_pts) %>%
+    left_join(last_week, by = "relevant_player_id") %>%
+    mutate(curr_week_fant_pts = if_else(is.na(curr_week_fant_pts), 0 , curr_week_fant_pts),
+           tot_fant_pts = if_else(is.na(tot_fant_pts), 0, tot_fant_pts),
+           improvement = curr_week_fant_pts - tot_fant_pts) %>%
+    select(relevant_player_id, improvement)
+  
+  return(combined)
+}
+
+# Needs a small fix, a little tied up on corner case where no prev games exists
+lagged_performance <- recombined_fantasy %>%
+  group_by(game_id, week, away_team, home_team, relevant_player_id) %>%
+  summarize(tot_fant_pts = sum(fant_pt, na.rm = TRUE)) %>%
+  arrange(desc(week)) %>%
+  nest(-c(game_id, week, away_team, home_team)) %>%
+  pivot_longer(cols = c(away_team, home_team), names_to = "home_away",
+               values_to = "teams_involved") %>%
+  group_by(teams_involved) %>%
+  filter(week == first(week) | week == lead(week, default = 0)) %>%
+  mutate(n_games = n(),
+         game_n = row_number()) %>%
+  pivot_wider(names_from = game_n, names_prefix = "games_", values_from = data) %>%
+  mutate(games_2 = if_else(n_games == 1, 0, games_2)) %>%
+  mutate(improvement_measure = map2(games_1, games_2, ~gap_fn))
+  
+
+# 3. Home Runs Only
+# Started the player with the most fantasy points generated per touch, QBs excluded
+
+
+# 4. My Name is Versatility
+# Started the player that generated the most unconventional points for that role 
+# (rushing yards for receivers, receiving yards for QB, passing yards for any skill position)
+
