@@ -10,6 +10,10 @@ library(httr)
 # Mappings
 player_mappings <- readRDS("current_most_complete_map.rds")
 
+# Position information
+positions <- readRDS("players_and_ids.rds") %>%
+  select(primary_position, players = player_id)
+
 # Rosters
 # Grab Rosters from Sleeper (this part can be automated in a script later)
 base_url <- "https://api.sleeper.app/v1/league/604138427104952320/"
@@ -53,7 +57,8 @@ updated_rosters <- rosters_df %>%
 
 # Rosters also with names
 named_rosters <- updated_rosters %>%
-  left_join(player_mappings, by = c("players" = "player_id"))
+  left_join(player_mappings, by = c("players" = "player_id")) %>%
+  left_join(positions, by = "players")
 
 # pbp data
 pbp_2020 <- readRDS(
@@ -106,7 +111,7 @@ recombined_fantasy <- rusher_fantasy_and_epa %>%
 # 1. Hit the Showers Early
 # Team had the biggest point discrepancy between 1st and 2nd half of games
 player_halves <- recombined_fantasy %>%
-  group_by(game_id, game_half, relevant_player_id) %>%
+  group_by(week, game_id, game_half, relevant_player_id) %>%
   summarize(tot_fant_pts = sum(fant_pt, na.rm = TRUE)) %>%
   pivot_wider(names_from = game_half, values_from = tot_fant_pts) %>%
   mutate(Half1 = if_else(is.na(Half1), 0, Half1),
@@ -118,7 +123,7 @@ player_halves <- recombined_fantasy %>%
 showers <- named_rosters %>%
   inner_join(player_halves, by = c("new_id" = "relevant_player_id")) %>%
   filter(is_starter) %>%
-  group_by(user) %>%
+  group_by(user, week) %>%
   summarize(early_game = sum(discrepancy)) %>%
   arrange(desc(early_game))
 
@@ -146,7 +151,7 @@ gap_fn <- function(curr_week, last_week){
   return(combined)
 }
 
-# Needs a small fix, a little tied up on corner case where no prev games exists
+# Separate into two steps to avoid issue, only will work week 2 and beyond
 lagged_performance <- recombined_fantasy %>%
   group_by(game_id, week, away_team, home_team, relevant_player_id) %>%
   summarize(tot_fant_pts = sum(fant_pt, na.rm = TRUE)) %>%
@@ -159,15 +164,47 @@ lagged_performance <- recombined_fantasy %>%
   mutate(n_games = n(),
          game_n = row_number()) %>%
   pivot_wider(names_from = game_n, names_prefix = "games_", values_from = data) %>%
-  mutate(games_2 = if_else(n_games == 1, 0, games_2)) %>%
-  mutate(improvement_measure = map2(games_1, games_2, ~gap_fn))
+  filter(n_games > 1)
   
+# Check for games_2: I think this is in the right order, wont know until week 2
+if("games_2" %in% names(lagged_performance)){
+  lagged_perf_update <- lagged_performance %>%
+    mutate(improvement = map2(games_1, games_2, gap_fn))
+}
+# Probably still needs a bit of work
+
 
 # 3. Home Runs Only
-# Started the player with the most fantasy points generated per touch, QBs excluded
-
+# Started the player with the most fantasy points generated per touch or target, QBs included
+  # Minimum 5 touch or target
+# Dont add week filter, let this be a running calc for each week
+home_runs <- recombined_fantasy %>%
+  group_by(week, game_id, relevant_player_id) %>%
+  summarize(n_touches = n(),
+            fant_per_touch = sum(fant_pt, na.rm=TRUE) / n_touches) %>%
+  filter(n_touches >= 5, !is.na(relevant_player_id)) %>%
+  arrange(desc(fant_per_touch))
+  
+homers <- named_rosters %>%
+  inner_join(home_runs, by = c("new_id" = "relevant_player_id")) %>%
+  filter(is_starter) %>%
+  group_by(week) %>%
+  arrange(desc(fant_per_touch)) %>%
+  slice(1)
 
 # 4. My Name is Versatility
 # Started the player that generated the most unconventional points for that role 
 # (rushing yards for receivers, receiving yards for QB, passing yards for any skill position)
+fant_pt_by_off_pos <- recombined_fantasy %>%
+  group_by(game_id, week, relevant_player_id, position) %>%
+  summarize(tot_fant_pts = sum(fant_pt)) %>%
+  filter(!is.na(relevant_player_id))
 
+off_role <- named_rosters %>%
+  inner_join(fant_pt_by_off_pos, by = c("new_id" = "relevant_player_id")) %>%
+  filter(primary_position %in% c("WR", "TE") & position %in% c("rusher", "passer") |
+           primary_position %in% "RB" & position %in% "passer" |
+           primary_position %in% "QB" & position %in% "receiver") %>%
+  group_by(week) %>%
+  arrange(desc(tot_fant_pts)) %>%
+  slice(1)
