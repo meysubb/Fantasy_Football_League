@@ -5,7 +5,10 @@ library(httr)
 
 # Load mappings
 sleeper_league <- readRDS("players_and_ids.rds")
-mappings <- readRDS("id_mapping.rds")
+mappings <- readRDS("id_mapping.rds") %>%
+  mutate(last_name = str_extract(full_name, "[A-z\\-\\']+$"),
+         f_last = paste0(substr(full_name, 1, 1), ".", last_name)) %>%
+  select(-last_name)
 
 # Update to one global list of relevant factors for our fantasy league
   # Note that DEF exists, it just wont map very well to nflfastR
@@ -59,6 +62,48 @@ updated_rosters <- rosters_df %>%
 rosters_and_ids <- updated_rosters %>%
   left_join(just_fantasy_elig, by = c("players" = "player_id"))
 
+# So Rookies dont work
+# Need to convert Rookies to F.LastName and try to map accordingly
+rookies <- sleeper_league %>%
+  filter(years_exp == 0) %>%
+  mutate(f_last = paste0(substr(first_name, 1, 1), ".", last_name)) %>%
+  select(full_name, f_last, position, primary_position, contains("id"))
+
+rookies_pbp_name_key <- pbp_2020 %>%
+  select(season, week, home_team, away_team, play_id, ends_with("player_name")) %>%
+  pivot_longer(ends_with("player_name"),
+               names_to = "player_desc",
+               values_to = "player_key",
+               values_drop_na = TRUE)
+rookies_pbp_id_key <- pbp_2020 %>%
+  select(season, week, home_team, away_team, play_id, ends_with("player_id")) %>%
+  pivot_longer(ends_with("player_id"),
+               names_to = "player_desc",
+               values_to = "new_id",
+               values_drop_na = TRUE)
+
+rookies_pbp <- rookies_pbp_name_key %>%
+  bind_cols(rookies_pbp_id_key %>% select(new_id)) %>%
+  select(player_key, new_id) %>%
+  distinct()
+
+# Doesnt work overly well, but good enough
+rookies_joined <- rookies %>%
+  filter(primary_position %in% c("QB", "WR", "TE", "RB", "FB", "HB"),
+         !(f_last %in% "D.Johnson")) %>%
+  left_join(rookies_pbp, by = c("f_last" = "player_key"))
+
+# basically rookies will only show up when they appear in the boxscore
+# Until then we have no way to map them
+current_rookies <- rookies_joined %>%
+  filter(!is.na(new_id)) %>%
+  select(full_name, f_last, gsis_id, new_id)
+
+# Add the current rookies to the set
+mappings_with_rookies <- mappings %>%
+  bind_rows(current_rookies)
+
+
 # Now lets pair this with their total fantasy points this season and this week
   # Doing so will likely require me to bring in nflfastR here
   # Going to need to manually enumerate which is easy enough
@@ -72,7 +117,7 @@ smaller_pbp <- pbp_2020 %>%
   select(play_id, game_id, home_team, away_team, week, 
          yardline_100, game_seconds_remaining, game_half, qtr,
          down, goal_to_go, ydstogo, desc, play_type, yards_gained,
-         total_home_score, total_away_score, ep, epa,
+         total_home_score, total_away_score, complete_pass, ep, epa,
          air_epa, yac_epa, comp_air_epa, comp_yac_epa,
          fumble_lost, interception, two_point_conv_result, touchdown, pass_touchdown,
          receiver_player_id, rusher_player_id, passer_player_id) %>%
@@ -102,7 +147,8 @@ passer_fantasy_and_epa <- pass_2020 %>%
 
 receiver_fantasy_and_epa <- pass_2020 %>%
   group_by(receiver_player_id) %>%
-  summarize(n_receptions = n(),
+  summarize(n_targets = n(),
+            n_receptions = sum(complete_pass),
             rec_fant_pt = 0.5 * n_receptions + sum( 0.1 * yards_gained +
                                 6 * touchdown + 2 * two_point_conv_result),
             rec_epa = sum(epa),
@@ -116,3 +162,8 @@ fantasy_results <- receiver_fantasy_and_epa %>%
   mutate(tot_fant_points = sum(c(rec_fant_pt, pass_fant_pt, rush_fant_pt), na.rm=TRUE),
          tot_epa = sum(c(rec_epa, pass_epa, rush_epa), na.rm=TRUE),
          tot_individual_epa = sum(c(tot_yac_epa, tot_air_epa), na.rm=TRUE))
+
+mappings_with_rookies %>%
+  inner_join(fantasy_results, by = c("new_id" = "player_id")) %>%
+  View()
+
