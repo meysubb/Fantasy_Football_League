@@ -97,7 +97,7 @@ rookies_joined <- rookies %>%
 # Until then we have no way to map them
 current_rookies <- rookies_joined %>%
   filter(!is.na(new_id)) %>%
-  select(full_name, f_last, gsis_id, new_id)
+  select(full_name, f_last, gsis_id, player_id, new_id)
 
 # Add the current rookies to the set
 mappings_with_rookies <- mappings %>%
@@ -167,3 +167,6 @@ mappings_with_rookies %>%
   inner_join(fantasy_results, by = c("new_id" = "player_id")) %>%
   View()
 
+mappings_with_rookies %>%
+  select(full_name, f_last, gsis_id, player_id, new_id) %>%
+  saveRDS("current_most_complete_map.rds")

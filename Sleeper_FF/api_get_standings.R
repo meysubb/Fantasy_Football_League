@@ -135,7 +135,7 @@ legacy_mappings <- readRDS("C:/Users/reyers9597/Downloads/legacy_id_map.rds")
   # Surely at least one works?
 # First gsis
 unique_sleeper <- players_tibble %>%
-  select(full_name, gsis_id) %>%
+  select(full_name, gsis_id, player_id) %>%
   distinct() %>%
   mutate(gsis_id = trimws(gsis_id)) %>%
   filter(!is.na(gsis_id))
@@ -145,7 +145,7 @@ sleeper_and_nflfastr <- unique_sleeper %>%
 
 # Legacy mappings are even better somehow? But only for old players
 # Need the same gsis -> new_id mapping that they have here
-
+seasons <- 2010:2019
 legacy_pbp <- purrr::map_df(seasons, function(x) {
   readRDS(
     url(
