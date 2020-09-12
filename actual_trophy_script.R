@@ -70,6 +70,7 @@ pbp_2020 <- readRDS(
 smaller_pbp <- pbp_2020 %>%
   select(play_id, game_id, home_team, away_team, week, 
          yardline_100, game_seconds_remaining, game_half, qtr,
+         drive, drive_play_count, 
          down, goal_to_go, ydstogo, desc, play_type, yards_gained,
          total_home_score, total_away_score, complete_pass, ep, epa,
          air_epa, yac_epa, comp_air_epa, comp_yac_epa,
@@ -208,3 +209,22 @@ off_role <- named_rosters %>%
   group_by(week) %>%
   arrange(desc(tot_fant_pts)) %>%
   slice(1)
+
+# 9 - Running Backs Don't Matter:
+# Had the highest ADP RB to average negative EPA per touch, minimum 10 touches 
+# ( I think there is a version of EPA for OL controlled, perhaps from BDB2?)
+
+
+# 10 - I thought we were Playing Basketball?
+# Start the Quarterback that led the most 3 and out drives
+# This gets the count of QBs with the most 3 and out drives.
+qb_drive_cnt <- smaller_pbp  %>% select(game_id,drive,drive_play_count,passer_player_id) %>% group_by(game_id,drive) %>% 
+  filter(!is.na(drive)) %>%
+  summarise_all(funs(first(na.omit(.)))) %>%
+  ungroup() %>% 
+  group_by(passer_player_id) %>%
+  summarise(n = sum(drive_play_count==3))
+
+
+# 11 - The other side of the football: 
+# Start the highest scoring defense.
