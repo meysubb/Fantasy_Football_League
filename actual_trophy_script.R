@@ -71,8 +71,9 @@ smaller_pbp <- pbp_2020 %>%
   select(play_id, game_id, home_team, away_team, week, 
          yardline_100, game_seconds_remaining, game_half, qtr,
          down, goal_to_go, ydstogo, desc, play_type, yards_gained,
-         total_home_score, total_away_score, complete_pass, ep, epa,
+         total_home_score, total_away_score, complete_pass, ep, epa, wpa,
          air_epa, yac_epa, comp_air_epa, comp_yac_epa,
+         air_wpa, yac_wpa, comp_air_wpa, comp_yac_wpa,
          fumble_lost, interception, two_point_conv_result, touchdown, pass_touchdown,
          receiver_player_id, rusher_player_id, passer_player_id) %>%
   mutate(two_point_conv_result = if_else(two_point_conv_result %in% "success", 1, 0))
@@ -207,4 +208,58 @@ off_role <- named_rosters %>%
            primary_position %in% "QB" & position %in% "receiver") %>%
   group_by(week) %>%
   arrange(desc(tot_fant_pts)) %>%
+  slice(1)
+
+# 5. The Tenure of Jeff Fisher
+# Closest team to the median but below
+jeff_fisher <- recombined_fantasy %>%
+  group_by(week, game_id, relevant_player_id) %>%
+  summarize(tot_fant_pts = sum(fant_pt, na.rm = TRUE)) %>%
+  filter(!is.na(relevant_player_id))
+
+jeff_fisher_rosters <- named_rosters %>%
+  filter(is_starter) %>%
+  left_join(jeff_fisher, by = c("new_id" = "relevant_player_id")) %>%
+  group_by(user) %>%
+  summarize(tot_pts = sum(tot_fant_pts, na.rm=TRUE)) %>%
+  arrange(desc(tot_pts)) %>%
+  slice(6)
+
+# 6. Fantasy Point Dont Matter
+# Had the starters that generated the largest Total EPA in a given week
+  # Passing: QBs get air_epa, receiver get yac_epa
+epa_kings <- recombined_fantasy %>%
+  group_by(week, game_id, relevant_player_id) %>%
+  mutate(new_epa = case_when(position %in% "receiver" ~ yac_epa,
+                             position %in% "passer" ~ air_epa,
+                             TRUE ~ epa)) %>%
+  summarize(tot_epa = sum(new_epa)) %>%
+  filter(!is.na(relevant_player_id))
+
+epa_team <- named_rosters %>%
+  filter(is_starter) %>%
+  left_join(epa_kings, by = c("new_id" = "relevant_player_id")) %>%
+  filter(!is.na(week)) %>%
+  group_by(week, user) %>%
+  summarize(tot_epa_user = sum(tot_epa, na.rm=TRUE)) %>%
+  arrange(desc(tot_epa_user)) %>%
+  slice(1)
+
+# 7. At Least We Won On the Field
+# Had the starters that generated the largest Total WPA in a given week
+wpa_kings <- recombined_fantasy %>%
+  group_by(week, game_id, relevant_player_id) %>%
+  mutate(new_wpa = case_when(position %in% "receiver" ~ yac_wpa,
+                             position %in% "passer" ~ air_wpa,
+                             TRUE ~ wpa)) %>%
+  summarize(tot_wpa = sum(new_wpa)) %>%
+  filter(!is.na(relevant_player_id))
+
+wpa_team <- named_rosters %>%
+  filter(is_starter) %>%
+  left_join(wpa_kings, by = c("new_id" = "relevant_player_id")) %>%
+  filter(!is.na(week)) %>%
+  group_by(week, user) %>%
+  summarize(tot_wpa_user = sum(tot_wpa, na.rm=TRUE)) %>%
+  arrange(desc(tot_wpa_user)) %>%
   slice(1)
