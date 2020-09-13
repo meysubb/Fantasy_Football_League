@@ -263,3 +263,13 @@ wpa_team <- named_rosters %>%
   summarize(tot_wpa_user = sum(tot_wpa, na.rm=TRUE)) %>%
   arrange(desc(tot_wpa_user)) %>%
   slice(1)
+
+# A special attempt here: Can I do the matchup tracker?
+# To do so I would need to make a global time tracker within games and then
+# create a cumulative sum of fantasy points. I guess I would do this at a
+# user level instead of a player level to get a more condensed file.
+# From there I would just plot points against time facet_wrapped() by matchup.
+# This sounds doable, only thing I need now is the start time and a time tracker
+# Could do something like 3600 - game_time_remaining + start time
+# Oh wow, the variable is actually called start_time
+# Unique key is then game_date, start_time + game_seconds_remaining
