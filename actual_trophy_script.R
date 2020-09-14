@@ -60,6 +60,16 @@ named_rosters <- updated_rosters %>%
   left_join(player_mappings, by = c("players" = "player_id")) %>%
   left_join(positions, by = "players")
 
+# Also realized I forgot to get real user names
+user_url <- paste0(base_url, "users")
+user_get <- GET(user_url)
+user_content <- content(user_get)
+
+user_df <- tibble(user_content) %>%
+  unnest_wider(col = user_content) %>%
+  unnest_wider(col = metadata, names_sep = "_") %>%
+  select(user_id, metadata_team_name)
+
 # pbp data
 pbp_2020 <- readRDS(
   url("https://raw.githubusercontent.com/guga31bb/nflfastR-data/master/data/play_by_play_2020.rds")
@@ -68,9 +78,10 @@ pbp_2020 <- readRDS(
 # I need to make some modifications so that this is joinable, currently there are IDs everywhere
 # Easiest one would be to make this into pass and rush plays separately and create join rules
 smaller_pbp <- pbp_2020 %>%
-  select(play_id, game_id, home_team, away_team, week, 
+  select(play_id, game_id, game_date, home_team, away_team, week, 
          yardline_100, game_seconds_remaining, game_half, qtr,
          down, goal_to_go, ydstogo, desc, play_type, yards_gained,
+         start_time, game_seconds_remaining,
          total_home_score, total_away_score, complete_pass, ep, epa, wpa,
          air_epa, yac_epa, comp_air_epa, comp_yac_epa,
          air_wpa, yac_wpa, comp_air_wpa, comp_yac_wpa,
@@ -273,3 +284,35 @@ wpa_team <- named_rosters %>%
 # Could do something like 3600 - game_time_remaining + start time
 # Oh wow, the variable is actually called start_time
 # Unique key is then game_date, start_time + game_seconds_remaining
+matchup <- recombined_fantasy %>%
+  mutate(game_date_check = paste0(game_date, " ", start_time),
+         game_date_time = as.POSIXct(paste0(game_date, " ", start_time)),
+         global_timer = game_date_time + 3600 - game_seconds_remaining) %>%
+  arrange(global_timer) %>%
+  group_by(relevant_player_id) %>%
+  mutate(fant_pt_tracker = cumsum(fant_pt)) %>%
+  ungroup()
+
+# Now join back the appropriate owner and track
+matchup_tracker <- matchup %>%
+  filter(!is.na(relevant_player_id)) %>%
+  left_join(named_rosters %>% select(new_id, user),
+            by = c("relevant_player_id" = "new_id")) %>%
+  filter(!is.na(user)) %>%
+  arrange(global_timer) %>%
+  group_by(user) %>%
+  mutate(tot_user_fant_pts = cumsum(fant_pt)) %>%
+  left_join(user_df, by = c("user" = "user_id"))
+
+# Quick check
+matchup_tracker %>%
+  ggplot(aes(x = global_timer, y = tot_user_fant_pts, col = metadata_team_name)) +
+  geom_point() +
+  geom_line() +
+  scale_x_datetime(breaks = as.POSIXct(c("2020-09-10 20:20:00",
+                              "2020-09-13 10:00:00",
+                              "2020-09-13 13:00:00",
+                              "2020-09-13 18:00:00",
+                              "2020-09-14 16:00:00")))
+
+# Time to try this again now that the pbp has been updated for Sunday morning and afternoon
