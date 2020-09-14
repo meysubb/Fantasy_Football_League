@@ -304,15 +304,19 @@ matchup_tracker <- matchup %>%
   mutate(tot_user_fant_pts = cumsum(fant_pt)) %>%
   left_join(user_df, by = c("user" = "user_id"))
 
+# Below is not yet working
+adjust_date_times <- matchup_tracker %>%
+  arrange(global_timer) %>%
+  # Now its 0 to 4 essentially, but in terms of seconds
+  # So its 0-3600, then 2 days + 0-3600
+  mutate(new_timer = global_timer - first(global_timer)) %>%
+  mutate(adj_seconds = as.numeric(case_when(new_timer > 5000 ~ new_timer - 48*3600,
+                                 TRUE ~ new_timer)))
+
 # Quick check
-matchup_tracker %>%
-  ggplot(aes(x = global_timer, y = tot_user_fant_pts, col = metadata_team_name)) +
+adjust_date_times %>%
+  ggplot(aes(x = adj_seconds, y = tot_user_fant_pts, col = metadata_team_name)) +
   geom_point() +
-  geom_line() +
-  scale_x_datetime(breaks = as.POSIXct(c("2020-09-10 20:20:00",
-                              "2020-09-13 10:00:00",
-                              "2020-09-13 13:00:00",
-                              "2020-09-13 18:00:00",
-                              "2020-09-14 16:00:00")))
+  geom_line() 
 
 # Time to try this again now that the pbp has been updated for Sunday morning and afternoon
