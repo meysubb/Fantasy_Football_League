@@ -210,9 +210,10 @@ off_role <- named_rosters %>%
   arrange(desc(tot_fant_pts)) %>%
   slice(1)
 
-# 9 - Running Backs Don't Matter:
+# 9 - Running Backs Don't Matter
 # Had the highest ADP RB to average negative EPA per touch, minimum 10 touches 
 # ( I think there is a version of EPA for OL controlled, perhaps from BDB2?)
+adp_values <- 
 
 
 # 10 - I thought we were Playing Basketball?
@@ -225,6 +226,7 @@ qb_drive_cnt <- smaller_pbp  %>% select(game_id,drive,drive_play_count,passer_pl
   group_by(passer_player_id) %>%
   summarise(n = sum(drive_play_count==3))
 
-
 # 11 - The other side of the football: 
 # Start the highest scoring defense.
+
+recombined_fantasy
