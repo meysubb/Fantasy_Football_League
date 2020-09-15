@@ -296,7 +296,7 @@ matchup <- recombined_fantasy %>%
 # Now join back the appropriate owner and track
 matchup_tracker <- matchup %>%
   filter(!is.na(relevant_player_id)) %>%
-  left_join(named_rosters %>% select(new_id, user),
+  inner_join(named_rosters %>% filter(is_starter) %>% select(new_id, user),
             by = c("relevant_player_id" = "new_id")) %>%
   filter(!is.na(user)) %>%
   arrange(global_timer) %>%
@@ -306,17 +306,47 @@ matchup_tracker <- matchup %>%
 
 # Below is not yet working
 adjust_date_times <- matchup_tracker %>%
+  ungroup() %>%
   arrange(global_timer) %>%
   # Now its 0 to 4 essentially, but in terms of seconds
   # So its 0-3600, then 2 days + 0-3600
+  # 10AM SUN to 8PM THURS is 4 + 24 + 24 + 10
+  # 4PM MON to 9PM SUN to THURS is 16 + 3 + 62
   mutate(new_timer = global_timer - first(global_timer)) %>%
-  mutate(adj_seconds = as.numeric(case_when(new_timer > 5000 ~ new_timer - 48*3600,
-                                 TRUE ~ new_timer)))
+  mutate(adj_seconds = as.numeric(
+    case_when(new_timer > 280000 ~ new_timer - 91 * 3600,
+              new_timer > 10000 ~ new_timer - 62 * 3600,
+              TRUE ~ new_timer)))
+
+# Manually modify matchups this week
+adjust_date_times <- adjust_date_times %>%
+  mutate(matchups = case_when(
+    metadata_team_name %in% c("We The North", "Run Run Pass Punt") ~ "1",
+    metadata_team_name %in% c("Sundog Millionaire", "Republic of Dan Marino") ~ "2",
+    metadata_team_name %in% c("WRGalore", "Pandamic ") ~ "3",
+    metadata_team_name %in% c("Zelous Wheeler and Dealer", "Beef Ribs") ~ "4",
+    TRUE ~ "5"))
 
 # Quick check
 adjust_date_times %>%
   ggplot(aes(x = adj_seconds, y = tot_user_fant_pts, col = metadata_team_name)) +
   geom_point() +
-  geom_line() 
+  geom_line() +
+  labs(color = "Team Name") +
+  xlab("Matchup Time") + ylab("Cumulative Fantasy Points") +
+  ggtitle("Week 1 Matchups") +
+  theme(axis.text.x = element_blank()) +
+  theme_bw()
 
-# Time to try this again now that the pbp has been updated for Sunday morning and afternoon
+# Matchup 1
+adjust_date_times %>%
+  filter(matchups %in% "1") %>%
+  ggplot(aes(x = adj_seconds, y = tot_user_fant_pts, col = metadata_team_name)) +
+  geom_point() +
+  geom_line() +
+  labs(color = "Team Name") +
+  xlab("Matchup Time") + ylab("Cumulative Fantasy Points") +
+  ggtitle("Week 1 Matchups") +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
