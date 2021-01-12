@@ -68,17 +68,23 @@ user_content <- content(user_get)
 user_df <- tibble(user_content) %>%
   unnest_wider(col = user_content) %>%
   unnest_wider(col = metadata, names_sep = "_") %>%
-  select(user_id, metadata_team_name)
+  select(user_id, metadata_team_name) %>%
+  filter(!is.na(metadata_team_name))
 
 # pbp data
 pbp_2020 <- readRDS(
   url("https://raw.githubusercontent.com/guga31bb/nflfastR-data/master/data/play_by_play_2020.rds")
 )
 
+# Possible additional info for gsis IDs
+gsis_ids <- read_csv(
+  url("https://raw.githubusercontent.com/z-feldman/nfl_data/master/data/nfl_rosters.csv")
+)
+
 # I need to make some modifications so that this is joinable, currently there are IDs everywhere
 # Easiest one would be to make this into pass and rush plays separately and create join rules
 smaller_pbp <- pbp_2020 %>%
-  select(play_id, game_id, game_date, home_team, away_team, week, 
+  select(play_id, game_id, game_date, home_team, away_team, week, posteam_type,
          yardline_100, game_seconds_remaining, game_half, qtr,
          down, goal_to_go, ydstogo, desc, play_type, yards_gained,
          start_time, game_seconds_remaining,
@@ -137,7 +143,8 @@ showers <- named_rosters %>%
   filter(is_starter) %>%
   group_by(user, week) %>%
   summarize(early_game = sum(discrepancy)) %>%
-  arrange(desc(early_game))
+  arrange(desc(early_game)) %>%
+  left_join(user_df, by = c("user" = "user_id"))
 
 # 2. Any Given Sunday
 # Started the player with the largest Z score or largest difference from last week
@@ -172,19 +179,43 @@ lagged_performance <- recombined_fantasy %>%
   pivot_longer(cols = c(away_team, home_team), names_to = "home_away",
                values_to = "teams_involved") %>%
   group_by(teams_involved) %>%
-  filter(week == first(week) | week == lead(week, default = 0)) %>%
-  mutate(n_games = n(),
-         game_n = row_number()) %>%
-  pivot_wider(names_from = game_n, names_prefix = "games_", values_from = data) %>%
-  filter(n_games > 1)
-  
-# Check for games_2: I think this is in the right order, wont know until week 2
-if("games_2" %in% names(lagged_performance)){
-  lagged_perf_update <- lagged_performance %>%
-    mutate(improvement = map2(games_1, games_2, gap_fn))
-}
-# Probably still needs a bit of work
+  mutate(week = as.double(week),
+         previous_week_join = ifelse(week == 1, NA, week + 1)) %>%
+  ungroup()
 
+current_week <- lagged_performance %>%
+  select(week, this_week = data, teams_involved)
+
+previous_week <- lagged_performance %>%
+  select(week = previous_week_join, last_week = data, teams_involved)
+
+lagged_together <- current_week %>%
+  left_join(previous_week, by = c("week", "teams_involved")) 
+
+lagged_update <- lagged_together %>%
+  mutate(this_length = map_dbl(this_week, ~length(.)),
+         last_length = map_dbl(last_week, ~length(.))) %>%
+  filter(week > 1, this_length > 0, last_length > 0) %>%
+  mutate(new_data = map2(this_week, last_week,
+                         ~ .x %>% inner_join(.y, by = "relevant_player_id",
+                                             copy = TRUE))) %>%
+  select(week, teams_involved, new_data) %>%
+  unnest(new_data) %>%
+  mutate(discrepancy = tot_fant_pts.x - tot_fant_pts.y,
+         scaled_discrepancy = if_else(tot_fant_pts.y < 1,
+                                      0,
+                                      tot_fant_pts.x / tot_fant_pts.y)) %>%
+  arrange(desc(scaled_discrepancy))
+
+# Now bring this back
+named_rosters %>%
+  left_join(lagged_update %>%
+              select(week, relevant_player_id, discrepancy, scaled_discrepancy) %>%
+              filter(!is.na(relevant_player_id)),
+            by = c("new_id" = "relevant_player_id")) %>%
+  arrange(desc(scaled_discrepancy)) %>%
+  left_join(user_df, by = c("user" = "user_id")) %>%
+  View()
 
 # 3. Home Runs Only
 # Started the player with the most fantasy points generated per touch or target, QBs included
@@ -202,7 +233,8 @@ homers <- named_rosters %>%
   filter(is_starter) %>%
   group_by(week) %>%
   arrange(desc(fant_per_touch)) %>%
-  slice(1)
+  slice(1) %>%
+  left_join(user_df, by = c("user" = "user_id"))
 
 # 4. My Name is Versatility
 # Started the player that generated the most unconventional points for that role 
@@ -219,7 +251,8 @@ off_role <- named_rosters %>%
            primary_position %in% "QB" & position %in% "receiver") %>%
   group_by(week) %>%
   arrange(desc(tot_fant_pts)) %>%
-  slice(1)
+  slice(1) %>%
+  left_join(user_df, by = c("user" = "user_id"))
 
 # 5. The Tenure of Jeff Fisher
 # Closest team to the median but below
@@ -254,7 +287,7 @@ epa_team <- named_rosters %>%
   group_by(week, user) %>%
   summarize(tot_epa_user = sum(tot_epa, na.rm=TRUE)) %>%
   arrange(desc(tot_epa_user)) %>%
-  slice(1)
+  left_join(user_df, by = c("user" = "user_id"))
 
 # 7. At Least We Won On the Field
 # Had the starters that generated the largest Total WPA in a given week
@@ -273,7 +306,7 @@ wpa_team <- named_rosters %>%
   group_by(week, user) %>%
   summarize(tot_wpa_user = sum(tot_wpa, na.rm=TRUE)) %>%
   arrange(desc(tot_wpa_user)) %>%
-  slice(1)
+  left_join(user_df, by = c("user" = "user_id"))
 
 # A special attempt here: Can I do the matchup tracker?
 # To do so I would need to make a global time tracker within games and then
@@ -340,10 +373,10 @@ adjust_date_times %>%
 
 # Matchup 1
 adjust_date_times %>%
-  filter(matchups %in% "1") %>%
+  filter(matchups %in% "5") %>%
   ggplot(aes(x = adj_seconds, y = tot_user_fant_pts, col = metadata_team_name)) +
   geom_point() +
-  geom_line() +
+  geom_line(size = 2) +
   labs(color = "Team Name") +
   xlab("Matchup Time") + ylab("Cumulative Fantasy Points") +
   ggtitle("Week 1 Matchups") +
